@@ -71,7 +71,6 @@ def parse_vtt_content(vtt_text: str) -> List[Dict]:
     segments = []
     lines = vtt_text.strip().split('\n')
     
-    # Skip WEBVTT header
     i = 0
     while i < len(lines) and not '-->' in lines[i]:
         i += 1
@@ -84,7 +83,6 @@ def parse_vtt_content(vtt_text: str) -> List[Dict]:
         line = lines[i].strip()
         
         if '-->' in line:
-            # Save previous segment if exists
             if current_text and current_start is not None:
                 segments.append({
                     'start': current_start,
@@ -92,7 +90,6 @@ def parse_vtt_content(vtt_text: str) -> List[Dict]:
                     'text': ' '.join(current_text)
                 })
             
-            # Parse timestamp
             times = line.split('-->')
             if len(times) == 2:
                 start_str = times[0].strip().split('.')[0]
@@ -102,14 +99,12 @@ def parse_vtt_content(vtt_text: str) -> List[Dict]:
                 current_end = time_to_seconds(end_str)
                 current_text = []
         elif line and not line.startswith('NOTE') and not line.startswith('STYLE'):
-            # Clean HTML tags
             clean_line = re.sub(r'<[^>]+>', '', line)
             if clean_line:
                 current_text.append(clean_line)
         
         i += 1
     
-    # Don't forget the last segment
     if current_text and current_start is not None:
         segments.append({
             'start': current_start,
@@ -127,7 +122,6 @@ def parse_srt_content(srt_text: str) -> List[Dict]:
     for block in blocks:
         lines = block.strip().split('\n')
         if len(lines) >= 2:
-            # Check if first line is a number (subtitle index)
             if lines[0].strip().isdigit():
                 time_line = lines[1]
                 text_lines = lines[2:]
@@ -135,13 +129,11 @@ def parse_srt_content(srt_text: str) -> List[Dict]:
                 time_line = lines[0]
                 text_lines = lines[1:]
             
-            # Parse time line
             time_match = re.match(r'(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})', time_line)
             if time_match:
                 start_str = time_match.group(1).replace(',', '.')
                 end_str = time_match.group(2).replace(',', '.')
                 text = ' '.join(text_lines)
-                # Clean HTML tags
                 text = re.sub(r'<[^>]+>', '', text)
                 
                 segments.append({
@@ -215,7 +207,6 @@ class ViralClipExtractor:
                 sub_url = None
                 sub_format = None
                 
-                # Try manual subtitles first
                 if 'subtitles' in info and 'en' in info['subtitles']:
                     for sub in info['subtitles']['en']:
                         if sub.get('ext') in ['vtt', 'srt']:
@@ -223,7 +214,6 @@ class ViralClipExtractor:
                             sub_format = sub.get('ext')
                             break
                 
-                # Fall back to auto-generated
                 if not sub_url and 'automatic_captions' in info and 'en' in info['automatic_captions']:
                     for sub in info['automatic_captions']['en']:
                         if sub.get('ext') in ['vtt', 'srt', 'json3']:
@@ -234,12 +224,10 @@ class ViralClipExtractor:
                 if not sub_url:
                     return ""
                 
-                # Fetch subtitle content
                 response = requests.get(sub_url, headers=self.headers, timeout=15)
                 response.raise_for_status()
                 sub_text = response.text
                 
-                # Parse based on format
                 segments = []
                 if sub_format == 'vtt' or sub_url.endswith('.vtt'):
                     segments = parse_vtt_content(sub_text)
@@ -263,7 +251,6 @@ class ViralClipExtractor:
                     except:
                         pass
                 
-                # Filter to time range
                 relevant = [
                     seg["text"] for seg in segments
                     if seg["end"] >= start and seg["start"] <= end and seg["text"].strip()
@@ -284,27 +271,23 @@ class ViralClipExtractor:
         score = 0
         reasons = []
         
-        # Hook words (up to 50 points)
         hooks = [w for w in HOOK_WORDS if w in transcript]
         hook_score = min(len(hooks) * 10, 50)
         score += hook_score
         if hooks:
             reasons.append(f"Hooks: {', '.join(hooks[:3])}")
         
-        # Emotion words (up to 30 points)
         emotions = [w for w in EMOTION_WORDS if w in transcript]
         emotion_score = min(len(emotions) * 6, 30)
         score += emotion_score
         if emotions:
             reasons.append(f"Emotion: {', '.join(emotions[:2])}")
         
-        # Conflict indicators (20 points)
         conflict_words = ["but", "however", "argument", "fight", "wrong", "disagree", "no way", "impossible"]
         if any(w in transcript for w in conflict_words):
             score += 20
             reasons.append("Conflict detected")
         
-        # Duration bonus
         duration = end - start
         if DEFAULT_MIN_CLIP_LENGTH <= duration <= DEFAULT_MAX_CLIP_LENGTH:
             score += 10
@@ -316,7 +299,6 @@ class ViralClipExtractor:
             score -= 5
             reasons.append("Long clip")
         
-        # Transcript quality bonus
         word_count = len(transcript.split())
         if word_count > 10:
             score += 5
@@ -339,7 +321,6 @@ class ViralClipExtractor:
         window_step = window_step or DEFAULT_WINDOW_STEP
         candidates = []
         
-        # Use chapters if available
         if video_info.get("chapters"):
             for ch in video_info["chapters"]:
                 clip_start = ch["start"]
@@ -351,7 +332,6 @@ class ViralClipExtractor:
                         "title": ch.get("title", "Untitled")
                     })
         else:
-            # Sliding windows
             for start in range(0, int(duration) - clip_length, window_step):
                 candidates.append({
                     "start": start,
@@ -359,44 +339,6 @@ class ViralClipExtractor:
                 })
         
         return candidates
-    
-    def get_download_url(self, url: str, start: float, end: float, quality: str = "720") -> Dict:
-        """Get download information for a clip"""
-        ydl_opts = {
-            'format': f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
-            'quiet': True,
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            formats = []
-            
-            for fmt in info.get('formats', []):
-                if fmt.get('vcodec') != 'none' and fmt.get('acodec') != 'none':
-                    height = fmt.get('height', 0)
-                    if height and height <= int(quality):
-                        formats.append({
-                            'format_id': fmt.get('format_id'),
-                            'ext': fmt.get('ext'),
-                            'quality': height,
-                            'url': fmt.get('url'),
-                            'filesize': fmt.get('filesize'),
-                            'filesize_approx': fmt.get('filesize_approx')
-                        })
-            
-            # Sort by quality descending
-            formats.sort(key=lambda x: x.get('quality', 0) or 0, reverse=True)
-            
-            return {
-                'video_id': info.get('id'),
-                'title': info.get('title'),
-                'start': start,
-                'end': end,
-                'start_formatted': seconds_to_time(start),
-                'end_formatted': seconds_to_time(end),
-                'formats': formats[:5],
-                'download_url': formats[0].get('url') if formats else None
-            }
 
 # ============== API ROUTES ==============
 
@@ -414,8 +356,7 @@ def index():
             "/extract": "POST - Extract video info only",
             "/score": "POST - Score a specific time range",
             "/download": "POST - Get download URL for a clip"
-        },
-        "documentation": "See README.md for detailed usage"
+        }
     })
 
 @app.route('/health', methods=['GET'])
@@ -469,36 +410,27 @@ def analyze_video():
         if not video_id:
             return jsonify({"error": "Invalid YouTube URL"}), 400
         
-        # Configuration options
         num_clips = data.get('num_clips', 5)
         clip_length = data.get('clip_length', DEFAULT_CLIP_LENGTH)
         window_step = data.get('window_step', DEFAULT_WINDOW_STEP)
         quality = data.get('quality', '720')
         
         extractor = ViralClipExtractor()
-        
-        # Get video info
         video_info = extractor.extract_video_info(url)
-        
-        # Generate candidates
         candidates = extractor.generate_candidates(video_info, clip_length, window_step)
         
-        # Score candidates
         scored_clips = []
         for i, cand in enumerate(candidates):
             score_data = extractor.score_clip(url, cand['start'], cand['end'])
             score_data['title'] = cand.get('title', f'Clip {i+1}')
             scored_clips.append(score_data)
         
-        # Sort by viral score
         scored_clips.sort(key=lambda x: x['viral_score'], reverse=True)
         
-        # Select top non-overlapping clips
         final_clips = []
         used_ranges = []
         
         for clip in scored_clips:
-            # Check for overlap
             overlaps = False
             for used in used_ranges:
                 if not (clip['end'] <= used['start'] or clip['start'] >= used['end']):
@@ -512,7 +444,6 @@ def analyze_video():
                 if len(final_clips) >= num_clips:
                     break
         
-        # Add formatted times and download info
         for clip in final_clips:
             clip['start_formatted'] = seconds_to_time(clip['start'])
             clip['end_formatted'] = seconds_to_time(clip['end'])
@@ -575,41 +506,6 @@ def score_range():
             "error": str(e)
         }), 500
 
-@app.route('/download', methods=['POST'])
-def get_download():
-    """Get download URL for a clip"""
-    try:
-        data = request.get_json()
-        if not data or 'url' not in data:
-            return jsonify({"error": "Missing 'url' parameter"}), 400
-        
-        if 'start' not in data or 'end' not in data:
-            return jsonify({"error": "Missing 'start' or 'end' parameter"}), 400
-        
-        url = data['url']
-        start = time_to_seconds(data['start'])
-        end = time_to_seconds(data['end'])
-        quality = data.get('quality', '720')
-        
-        video_id = extract_video_id(url)
-        if not video_id:
-            return jsonify({"error": "Invalid YouTube URL"}), 400
-        
-        extractor = ViralClipExtractor()
-        download_info = extractor.get_download_url(url, start, end, quality)
-        
-        return jsonify({
-            "success": True,
-            "video_id": video_id,
-            "download_info": download_info
-        })
-        
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
-
 @app.route('/transcript', methods=['POST'])
 def get_transcript():
     """Get transcript for a specific time range"""
@@ -648,11 +544,9 @@ def get_transcript():
 
 # ============== VERCEL HANDLER ==============
 
-# For Vercel serverless deployment
-def handler(request, context):
-    """Vercel serverless handler"""
-    with app.request_context(request.environ):
-        return app(request.environ, lambda status, headers: None)
+# This is the entry point for Vercel
+# DO NOT DELETE THIS LINE
+application = app
 
 # Local development
 if __name__ == '__main__':
