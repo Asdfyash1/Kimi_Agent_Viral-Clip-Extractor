@@ -130,7 +130,7 @@ logger = logging.getLogger(__name__)
 class ViralClipExtractor:
     def __init__(self):
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         }
         # Robust FFmpeg path resolution
         import shutil
@@ -163,8 +163,14 @@ class ViralClipExtractor:
         self.base_ydl_opts = {
             'quiet': False,
             'no_warnings': False,
-            # 'extractor_args': {'youtube': {'player_client': ['web']}},
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'web'],
+                    'skip': ['hls', 'dash'],  # Prefer progressive formats
+                }
+            },
             'http_headers': self.headers,
+            'extractor_retries': 3,
             # 'ffmpeg_location': ffmpeg_dir # Removed, relying on PATH
         }
         
