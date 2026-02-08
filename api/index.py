@@ -161,6 +161,9 @@ class ViralClipExtractor:
 
 
 
+        # Proxy configuration (for bypassing YouTube datacenter IP blocks)
+        proxy_url = os.environ.get('PROXY_URL')  # Format: http://user:pass@host:port
+        
         self.base_ydl_opts = {
             'quiet': False,
             'no_warnings': False,
@@ -173,6 +176,11 @@ class ViralClipExtractor:
             'extractor_retries': 3,
             # 'ffmpeg_location': ffmpeg_dir # Removed, relying on PATH
         }
+        
+        # Add proxy if configured
+        if proxy_url:
+            self.base_ydl_opts['proxy'] = proxy_url
+            logger.info(f"Using proxy: {proxy_url.split('@')[1] if '@' in proxy_url else proxy_url}")
         
         if ffmpeg_dir:
             logger.info(f"Added FFmpeg to PATH: {ffmpeg_dir}")
