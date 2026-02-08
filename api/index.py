@@ -166,7 +166,7 @@ class ViralClipExtractor:
             'no_warnings': False,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['web'],  # Web client doesn't require PO Token
+                    'player_client': ['android_testsuite', 'mediaconnect'],  # Bypass bot detection
                 }
             },
             'http_headers': self.headers,
