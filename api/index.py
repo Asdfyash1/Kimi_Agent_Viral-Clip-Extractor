@@ -522,7 +522,7 @@ def index():
     """Root endpoint - API info"""
     return jsonify({
         "name": "Viral Clip Extractor API",
-        "version": "1.3.0 (AI Enabled)",
+        "version": "1.3.1 (AI Enabled + Fix)",
         "description": "Extract and analyze viral clips from YouTube videos",
         "quick_start": {
             "endpoint": "/clips",
