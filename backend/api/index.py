@@ -263,110 +263,151 @@ class ViralClipExtractor:
             return None
 
     def analyze_with_gemini(self, transcript_segments: List[Dict], api_key: str) -> List[Dict]:
-        """Analyze full transcript using Gemini AI"""
-        try:
-            genai.configure(api_key=api_key)
-            # Using 2.0 Flash as 1.5 is unavailable for this key/region
-            model = genai.GenerativeModel('gemini-2.0-flash')
-            
-            # Helper to check if API key is likely valid (heuristic)
-            if "YOUR_GEMINI" in api_key:
-                raise ValueError("Invalid API Key placeholder used")
+        """Analyze transcript using Gemini AI with parallel chunking"""
+        import concurrent.futures
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        chunk_duration = 300  # 5 minutes
+        overlap = 30
+        
+        def process_chunk(chunk_segments, chunk_index):
+            try:
+                formatted_text = ""
+                for seg in chunk_segments:
+                    formatted_text += f"[{int(seg['start'])}s] {seg['text']} "
+                
+                prompt = f"""
+                Identify 1-2 viral clips from this transcript segment.
+                Transcript: {formatted_text[:15000]}
+                Return JSON array: [{{"start": number, "end": number, "viral_score": number, "reason": "string"}}]
+                """
+                
+                logger.info(f"Processing chunk {chunk_index} with Gemini...")
+                response = model.generate_content(prompt)
+                text = response.text
+                text = re.sub(r"```json\s*", "", text)
+                text = re.sub(r"```\s*", "", text)
+                return json.loads(text)
+            except Exception as e:
+                logger.error(f"Gemini chunk {chunk_index} error: {e}")
+                return []
 
-            # Construct prompt
-            formatted_text = ""
-            for seg in transcript_segments:
-                start = int(seg['start'])
-                text = seg['text']
-                formatted_text += f"[{start}s] {text} "
-            
-            # Truncate
-            full_context = formatted_text[:30000] # Safe limit
+        # Create chunks
+        chunks = []
+        if not transcript_segments: return []
+        full_duration = transcript_segments[-1]['end']
+        current_time = 0
+        while current_time < full_duration:
+            chunk_end = current_time + chunk_duration
+            chunk_segs = [s for s in transcript_segments if s['start'] >= current_time and s['start'] < chunk_end]
+            if chunk_segs: chunks.append(chunk_segs)
+            current_time += (chunk_duration - overlap)
 
-            prompt = f"""
-            You are a viral content expert. Analyze the video transcript (with timestamps) and identify the top 3-5 most engaging clips for Shorts/TikTok.
-            
-            Transcript:
-            {full_context}
-            
-            Return ONLY a raw JSON array (no markdown) of objects:
-            [
-                {{
-                    "start": <number_seconds>,
-                    "end": <number_seconds>,
-                    "viral_score": <0-100>,
-                    "reason": "<short explanation>"
-                }}
-            ]
-            """
-            
-            logger.info("Sending request to Gemini AI...")
-            response = model.generate_content(prompt)
-            text = response.text
-            # Clean markdown
-            text = re.sub(r"```json\s*", "", text)
-            text = re.sub(r"```\s*", "", text)
-            return json.loads(text)
-        except Exception as e:
-            logger.error(f"Gemini API Error: {e}")
-            raise e # Create visibility for the error
+        # Parallel Execution
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            infos = {executor.submit(process_chunk, c, i): i for i, c in enumerate(chunks)}
+            for future in concurrent.futures.as_completed(infos):
+                try:
+                    data = future.result()
+                    if isinstance(data, list): results.extend(data)
+                except: pass
+        
+        results.sort(key=lambda x: x.get('viral_score', 0), reverse=True)
+        return results[:5]
 
     def analyze_with_nvidia(self, transcript_segments: List[Dict], api_key: str) -> List[Dict]:
-        """Analyze full transcript using Nvidia/DeepSeek AI"""
-        try:
-            client = OpenAI(
-                base_url = "https://integrate.api.nvidia.com/v1",
-                api_key = api_key
-            )
+        """Analyze transcript using Nvidia/DeepSeek AI with parallel chunking"""
+        import concurrent.futures
+        
+        chunk_duration = 300  # 5 minutes per chunk
+        overlap = 30  # 30 seconds overlap
+        
+        # Helper to process a single chunk
+        def process_chunk(chunk_segments, chunk_index):
+            try:
+                client = OpenAI(
+                    base_url="https://integrate.api.nvidia.com/v1",
+                    api_key=api_key
+                )
+                
+                formatted_text = ""
+                for seg in chunk_segments:
+                    start = int(seg['start'])
+                    text = seg['text']
+                    formatted_text += f"[{start}s] {text} "
+                
+                prompt = f"""
+                Analyze this video segment and identify 1-2 most engaging viral clips (shorts/reels).
+                
+                Transcript Segment:
+                {formatted_text[:15000]}
+                
+                Return raw JSON array (no markdown):
+                [
+                    {{
+                        "start": <number_seconds>,
+                        "end": <number_seconds>,
+                        "viral_score": <0-100>,
+                        "reason": "<short explanation>"
+                    }}
+                ]
+                """
+                
+                logger.info(f"Processing chunk {chunk_index} with Nvidia AI...")
+                completion = client.chat.completions.create(
+                    model="deepseek-ai/deepseek-v3.1-terminus",
+                    messages=[{"role":"user","content":prompt}],
+                    temperature=0.2,
+                    max_tokens=1024,
+                    stream=False
+                )
+                
+                text = completion.choices[0].message.content
+                text = re.sub(r"```json\s*", "", text)
+                text = re.sub(r"```\s*", "", text)
+                text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+                return json.loads(text)
+            except Exception as e:
+                logger.error(f"Chunk {chunk_index} error: {e}")
+                return []
 
-            # Construct prompt
-            formatted_text = ""
-            for seg in transcript_segments:
-                start = int(seg['start'])
-                text = seg['text']
-                formatted_text += f"[{start}s] {text} "
+        # Create chunks
+        chunks = []
+        if not transcript_segments:
+            return []
             
-            full_context = formatted_text[:30000]
-
-            prompt = f"""
-            You are a viral content expert. Analyze the video transcript (with timestamps) and identify the top 3-5 most engaging clips for Shorts/TikTok.
-            
-            Transcript:
-            {full_context}
-            
-            Return ONLY a raw JSON array (no markdown) of objects:
-            [
-                {{
-                    "start": <number_seconds>,
-                    "end": <number_seconds>,
-                    "viral_score": <0-100>,
-                    "reason": "<short explanation>"
-                }}
+        full_duration = transcript_segments[-1]['end']
+        current_time = 0
+        
+        while current_time < full_duration:
+            chunk_end = current_time + chunk_duration
+            # Filter segments for this chunk
+            chunk_segs = [
+                s for s in transcript_segments 
+                if s['start'] >= current_time and s['start'] < chunk_end
             ]
-            """
-            
-            logger.info("Sending request to Nvidia/DeepSeek AI...")
-            completion = client.chat.completions.create(
-                model="deepseek-ai/deepseek-v3.1-terminus",
-                messages=[{"role":"user","content":prompt}],
-                temperature=0.2,
-                top_p=0.7,
-                max_tokens=8192,
-                extra_body={"chat_template_kwargs": {"thinking":True}},
-                stream=False
-            )
-            
-            text = completion.choices[0].message.content
-            # Clean markdown
-            text = re.sub(r"```json\s*", "", text)
-            text = re.sub(r"```\s*", "", text)
-            # Remove thinking content
-            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-            
-            return json.loads(text)
-        except Exception as e:
-            logger.error(f"Nvidia API Error: {e}")
-            raise e
+            if chunk_segs:
+                chunks.append(chunk_segs)
+            current_time += (chunk_duration - overlap)
+        
+        # Process in parallel
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_chunk = {executor.submit(process_chunk, chunk, i): i for i, chunk in enumerate(chunks)}
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                try:
+                    data = future.result()
+                    if isinstance(data, list):
+                        results.extend(data)
+                except Exception as e:
+                    logger.error(f"Parallel processing error: {e}")
+
+        # Sort by score and de-duplicate
+        results.sort(key=lambda x: x.get('viral_score', 0), reverse=True)
+        return results[:5]  # Return top 5
+
 
     def extract_video_info(self, url: str) -> Dict:
         """Get video metadata"""
