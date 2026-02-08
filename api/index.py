@@ -160,13 +160,13 @@ class ViralClipExtractor:
             logger.warning("FFmpeg NOT FOUND! Clip cutting will fail.")
 
 
+
         self.base_ydl_opts = {
             'quiet': False,
             'no_warnings': False,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'ios', 'web'],
-                    'skip': ['hls', 'dash'],  # Prefer progressive formats
+                    'player_client': ['web'],  # Web client doesn't require PO Token
                 }
             },
             'http_headers': self.headers,
