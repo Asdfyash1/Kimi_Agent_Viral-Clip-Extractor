@@ -463,8 +463,10 @@ class ViralClipExtractor:
                     sub_url = info['automatic_captions']['en'][-1].get('url')
                 
                 if not sub_url:
-                    logger.warning("No transcript found")
+                    logger.warning("No transcript found - no sub_url")
                     return []
+                
+                logger.info(f"Found subtitle URL: {sub_url[:100]}...")
                 
                 # Download subtitle with proxy support
                 proxies_dict = {}
@@ -474,10 +476,18 @@ class ViralClipExtractor:
                         'https': self.last_proxy_used
                     }
                     logger.info(f"Using proxy for subtitle download: {self.last_proxy_used.split('@')[1] if '@' in self.last_proxy_used else self.last_proxy_used}")
+                else:
+                    logger.warning("No proxy available for subtitle download!")
 
-                response = requests.get(sub_url, headers=self.headers, proxies=proxies_dict, timeout=15)
-                response.raise_for_status()
-                sub_text = response.text
+                try:
+                    response = requests.get(sub_url, headers=self.headers, proxies=proxies_dict, timeout=15)
+                    response.raise_for_status()
+                    sub_text = response.text
+                    logger.info(f"Subtitle response length: {len(sub_text)} chars")
+                    logger.info(f"Subtitle sample: {sub_text[:200]}")
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Subtitle download failed: {e}")
+                    return []
                 
                 segments = []
                 if sub_url.endswith('.vtt') or 'vtt' in sub_url:
