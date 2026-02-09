@@ -357,7 +357,7 @@ class ViralClipExtractor:
                 
                 logger.info(f"Processing chunk {chunk_index} with Nvidia AI...")
                 completion = client.chat.completions.create(
-                    model="deepseek-ai/deepseek-v3.1-terminus",
+                    model="deepseek-ai/deepseek-v3.2",
                     messages=[{"role":"user","content":prompt}],
                     temperature=0.2,
                     max_tokens=1024,
