@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 import requests
+from api.proxy_manager import ProxyManager
 
 # Try to import AI clients
 try:
@@ -136,6 +137,13 @@ class ViralClipExtractor:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
+        
+        # Initialize proxy manager
+        proxy_url = os.environ.get('PROXY_URL')
+        proxy_api_url = os.environ.get('PROXY_API_URL')
+        self.proxy_manager = ProxyManager(proxy_url=proxy_url, api_url=proxy_api_url)
+        self.last_proxy_used = None
+        
         self.base_ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -150,11 +158,27 @@ class ViralClipExtractor:
             'http_headers': self.headers,
         }
     
+    def _get_ydl_opts_with_proxy(self, **extra_opts):
+        """Get ydl_opts with current proxy from ProxyManager"""
+        opts = {**self.base_ydl_opts, **extra_opts}
+        
+        # Get next proxy from manager
+        proxy = self.proxy_manager.get_next_proxy()
+        if proxy:
+            opts['proxy'] = proxy
+            self.last_proxy_used = proxy
+            logger.info(f"Using proxy: {proxy.split('@')[1] if '@' in proxy else proxy}")
+        else:
+            logger.warning("No proxy available - may fail on Render!")
+        
+        return opts
+    
     def extract_video_info(self, url: str) -> Dict:
         """Extract basic video information"""
         logger.info(f"Extracting video info for: {url}")
         try:
-            with yt_dlp.YoutubeDL(self.base_ydl_opts) as ydl:
+            ydl_opts = self._get_ydl_opts_with_proxy()
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 return {
                     'title': info.get('title'),
@@ -170,13 +194,12 @@ class ViralClipExtractor:
     def fetch_full_transcript(self, url: str) -> List[Dict]:
         """Fetch transcript from YouTube video"""
         logger.info(f"Fetching transcript for: {url}")
-        ydl_opts = {
-            **self.base_ydl_opts,
-            'skip_download': True,
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitleslangs': ['en'],
-        }
+        ydl_opts = self._get_ydl_opts_with_proxy(
+            skip_download=True,
+            writesubtitles=True,
+            writeautomaticsub=True,
+            subtitleslangs=['en']
+        )
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -193,7 +216,17 @@ class ViralClipExtractor:
                     return []
                 
                 logger.info(f"Found subtitle URL: {sub_url[:80]}...")
-                response = requests.get(sub_url, headers=self.headers, timeout=15)
+                
+                # Use proxy for subtitle download
+                proxies_dict = {}
+                if self.last_proxy_used:
+                    proxies_dict = {
+                        'http': self.last_proxy_used,
+                        'https': self.last_proxy_used
+                    }
+                    logger.info(f"Using proxy for subtitle download")
+                
+                response = requests.get(sub_url, headers=self.headers, proxies=proxies_dict, timeout=15)
                 response.raise_for_status()
                 sub_text = response.text
                 logger.info(f"Downloaded {len(sub_text)} chars of subtitle")
@@ -434,13 +467,12 @@ JSON:"""
         format_str = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best"
         output_template = os.path.join(DOWNLOAD_DIR, f"{video_id}_%(id)s.%(ext)s")
         
-        ydl_opts = {
-            **self.base_ydl_opts,
-            'format': format_str,
-            'outtmpl': output_template,
-            'download_ranges': lambda info, ydl: [{'start_time': start, 'end_time': end}],
-            'force_keyframes_at_cuts': True,
-        }
+        ydl_opts = self._get_ydl_opts_with_proxy(
+            format=format_str,
+            outtmpl=output_template,
+            download_ranges=lambda info, ydl: [{'start_time': start, 'end_time': end}],
+            force_keyframes_at_cuts=True
+        )
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
