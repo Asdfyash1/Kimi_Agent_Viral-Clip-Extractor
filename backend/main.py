@@ -217,19 +217,43 @@ class ViralClipExtractor:
                 
                 logger.info(f"Found subtitle URL: {sub_url[:80]}...")
                 
-                # Use proxy for subtitle download
-                proxies_dict = {}
-                if self.last_proxy_used:
-                    proxies_dict = {
-                        'http': self.last_proxy_used,
-                        'https': self.last_proxy_used
-                    }
-                    logger.info(f"Using proxy for subtitle download")
-                
-                response = requests.get(sub_url, headers=self.headers, proxies=proxies_dict, timeout=15)
-                response.raise_for_status()
-                sub_text = response.text
-                logger.info(f"Downloaded {len(sub_text)} chars of subtitle")
+                # Retry with different proxies if rate limited
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        # Use proxy for subtitle download
+                        proxies_dict = {}
+                        if self.last_proxy_used:
+                            proxies_dict = {
+                                'http': self.last_proxy_used,
+                                'https': self.last_proxy_used
+                            }
+                            logger.info(f"Using proxy for subtitle download (attempt {attempt+1}/{max_retries})")
+                        
+                        response = requests.get(sub_url, headers=self.headers, proxies=proxies_dict, timeout=15)
+                        response.raise_for_status()
+                        sub_text = response.text
+                        logger.info(f"Downloaded {len(sub_text)} chars of subtitle")
+                        break  # Success!
+                        
+                    except requests.exceptions.HTTPError as e:
+                        if e.response.status_code == 429:
+                            logger.warning(f"Rate limited (429) on attempt {attempt+1}/{max_retries}")
+                            if attempt < max_retries - 1:
+                                # Try next proxy
+                                import time
+                                time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                                # Get a new proxy for next attempt
+                                new_proxy = self.proxy_manager.get_next_proxy()
+                                if new_proxy:
+                                    self.last_proxy_used = new_proxy
+                                    logger.info(f"Switching to next proxy: {new_proxy.split('@')[1] if '@' in new_proxy else new_proxy}")
+                                continue
+                        raise  # Re-raise if not 429 or last attempt
+                else:
+                    # All retries failed
+                    logger.error("All retry attempts failed for subtitle download")
+                    return []
                 
                 segments = []
                 if 'vtt' in sub_url or sub_text.startswith('WEBVTT'):
