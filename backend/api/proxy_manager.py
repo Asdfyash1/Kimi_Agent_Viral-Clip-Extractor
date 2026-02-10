@@ -38,7 +38,23 @@ class ProxyManager:
         elif proxy_url:
             logger.info("Initializing with single proxy")
             self._add_single_proxy(proxy_url)
-        else:
+        
+        # Load numbered proxy environment variables (PROXY_URL_1, PROXY_URL_2, etc.)
+        proxy_count = 0
+        for i in range(1, 100):  # Support up to 99 proxies
+            env_var = f"PROXY_URL_{i}"
+            proxy = os.environ.get(env_var)
+            if proxy:
+                self._add_single_proxy(proxy)
+                proxy_count += 1
+                logger.info(f"Loaded proxy from {env_var}")
+            elif i > 10:  # Stop checking after 10 consecutive missing vars
+                break
+        
+        if proxy_count > 0:
+            logger.info(f"Loaded {proxy_count} proxies from PROXY_URL_1, PROXY_URL_2, etc.")
+        
+        if not self.proxies:
             logger.warning("No proxy configuration provided")
     
     def _parse_proxy_format(self, proxy_str: str) -> str:
