@@ -1,3 +1,12 @@
+---
+title: Viral Clip Extractor
+emoji: 🎬
+colorFrom: red
+colorTo: pink
+sdk: docker
+pinned: false
+---
+
 # 🎬 Viral Clip Extractor API
 
 Turn long-form YouTube videos into engaging, viral-ready clips for TikTok, Shorts, and Reels using AI.
