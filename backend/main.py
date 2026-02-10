@@ -139,6 +139,11 @@ class ViralClipExtractor:
         self.base_ydl_opts = {
             'quiet': True,
             'no_warnings': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android_testsuite', 'mediaconnect'],  # Bypass bot detection
+                }
+            },
             'socket_timeout': 30,
             'retries': 3,
             'nocheckcertificate': True,
