@@ -135,7 +135,10 @@ def parse_vtt_content(content: str) -> List[Dict]:
 class ViralClipExtractor:
     def __init__(self):
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Mode': 'navigate',
         }
         
         # Initialize proxy manager
@@ -144,18 +147,29 @@ class ViralClipExtractor:
         self.proxy_manager = ProxyManager(proxy_url=proxy_url, api_url=proxy_api_url)
         self.last_proxy_used = None
         
+        # Check for cookies
+        cookies_path = os.environ.get('COOKIES_PATH', 'cookies.txt')
+        self.cookies_arg = {}
+        if os.path.exists(cookies_path):
+            logger.info(f"Found cookies file at: {cookies_path}")
+            self.cookies_arg = {'cookiefile': cookies_path}
+        
         self.base_ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android_testsuite', 'mediaconnect'],  # Bypass bot detection
+                    'player_client': ['web', 'android', 'ios'],
+                    'player_skip': ['webpage', 'configs', 'js'], 
+                    'include_live_dash': False,
                 }
             },
             'socket_timeout': 30,
-            'retries': 3,
+            'retries': 10,
+            'fragment_retries': 10,
             'nocheckcertificate': True,
             'http_headers': self.headers,
+            **self.cookies_arg
         }
     
     def _get_ydl_opts_with_proxy(self, **extra_opts):
